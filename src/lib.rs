@@ -76,16 +76,16 @@ impl std::ops::Deref for TlsListener {
 pub fn tls_config(
     cert: impl AsRef<Path>,
     key: impl AsRef<Path>,
-) -> std::result::Result<ServerConfig, Box<dyn std::error::Error>> {
+) -> std::result::Result<ServerConfig, Box<dyn std::error::Error + Send + Sync>> {
     let cert_chain = load::certs(cert)?;
     let key_der = load::key(key)?.ok_or("no private keys found")?;
 
-    let tls_config = rustls::ServerConfig::builder()
+    let config = rustls::ServerConfig::builder()
         .with_safe_defaults()
         .with_no_client_auth()
         .with_single_cert(cert_chain, key_der)?;
 
-    Ok(tls_config)
+    Ok(config)
 }
 
 pub mod load {
