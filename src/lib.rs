@@ -4,12 +4,12 @@ pub use rustls_pemfile;
 pub use tokio_rustls;
 pub use tokio_rustls::rustls;
 
-use std::future::Future;
-use std::io::Result;
-use std::net::SocketAddr;
-use std::path::Path;
-use std::sync::Arc;
-
+use std::{
+    future::Future,
+    io::{BufRead, Result},
+    net::SocketAddr,
+    sync::Arc,
+};
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 use tokio_rustls::TlsAcceptor;
 use tokio_rustls::{rustls::ServerConfig, server::TlsStream};
@@ -72,13 +72,12 @@ impl std::ops::Deref for TlsListener {
     }
 }
 
-/// **Note: This is blocking operation.**
 pub fn tls_config(
-    cert: impl AsRef<Path>,
-    key: impl AsRef<Path>,
+    certs: &mut dyn BufRead,
+    key: &mut dyn BufRead,
 ) -> std::result::Result<ServerConfig, Box<dyn std::error::Error + Send + Sync>> {
-    let cert_chain = load::certs(cert)?;
-    let key_der = load::key(key)?.ok_or("no private keys found")?;
+    let cert_chain = load::certs(certs)?;
+    let key_der = load::key(key)?.ok_or("no private key found")?;
 
     let config = rustls::ServerConfig::builder()
         .with_safe_defaults()
@@ -89,23 +88,18 @@ pub fn tls_config(
 }
 
 pub mod load {
+    use super::*;
     use rustls_pemfile::Item;
-    use std::{fs, io::Result, path::Path};
     use tokio_rustls::rustls::{Certificate, PrivateKey};
 
-    /// **Note: This is blocking operation.**
-    pub fn certs(path: impl AsRef<Path>) -> Result<Vec<Certificate>> {
-        let certs = rustls_pemfile::certs(&mut &*fs::read(path)?)?
-            .into_iter()
-            .map(Certificate)
-            .collect();
-
-        Ok(certs)
+    #[inline]
+    pub fn certs(rd: &mut dyn BufRead) -> Result<Vec<Certificate>> {
+        rustls_pemfile::certs(rd).map(|certs| certs.into_iter().map(Certificate).collect())
     }
 
-    /// **Note: This is blocking operation.**
-    pub fn key(path: impl AsRef<Path>) -> Result<Option<PrivateKey>> {
-        Ok(match rustls_pemfile::read_one(&mut &*fs::read(path)?)? {
+    #[inline]
+    pub fn key(rd: &mut dyn BufRead) -> Result<Option<PrivateKey>> {
+        Ok(match rustls_pemfile::read_one(rd)? {
             Some(Item::PKCS8Key(key) | Item::RSAKey(key)) => Some(PrivateKey(key)),
             _ => None,
         })
