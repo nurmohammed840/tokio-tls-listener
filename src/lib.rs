@@ -5,9 +5,11 @@ pub use tokio_rustls;
 pub use tokio_rustls::rustls;
 
 use std::{
+    fs,
     future::Future,
-    io::{BufRead, Result},
+    io::{self, BufRead, Result},
     net::SocketAddr,
+    path::Path,
     sync::Arc,
 };
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
@@ -19,12 +21,12 @@ pub struct TlsListener {
     pub tls_acceptor: TlsAcceptor,
 }
 
-impl<TlsConf> From<(TcpListener, TlsConf)> for TlsListener
+impl<ServerConf> From<(TcpListener, ServerConf)> for TlsListener
 where
-    TlsConf: Into<Arc<ServerConfig>>,
+    ServerConf: Into<Arc<ServerConfig>>,
 {
     #[inline]
-    fn from((tcp_listener, conf): (TcpListener, TlsConf)) -> Self {
+    fn from((tcp_listener, conf): (TcpListener, ServerConf)) -> Self {
         Self {
             tcp_listener,
             tls_acceptor: TlsAcceptor::from(conf.into()),
@@ -72,19 +74,26 @@ impl std::ops::Deref for TlsListener {
     }
 }
 
-pub fn tls_config(
-    certs: &mut dyn BufRead,
-    key: &mut dyn BufRead,
-) -> std::result::Result<ServerConfig, Box<dyn std::error::Error + Send + Sync>> {
-    let cert_chain = load::certs(certs)?;
-    let key_der = load::key(key)?.ok_or("no private key found")?;
+#[inline]
+pub fn load_tls_config(key: impl AsRef<Path>, cert: impl AsRef<Path>) -> io::Result<ServerConfig> {
+    let key = fs::read(key)?;
+    let cert = fs::read(cert)?;
+    tls_config(&mut &*key, &mut &*cert)
+}
 
-    let config = rustls::ServerConfig::builder()
+#[inline]
+pub fn tls_config(key: &mut dyn BufRead, certs: &mut dyn BufRead) -> io::Result<ServerConfig> {
+    let cert_chain = load::certs(certs)?;
+    let key_der = load::key(key)?.ok_or(io::Error::new(
+        io::ErrorKind::NotFound,
+        "no private key found",
+    ))?;
+
+    rustls::ServerConfig::builder()
         .with_safe_defaults()
         .with_no_client_auth()
-        .with_single_cert(cert_chain, key_der)?;
-
-    Ok(config)
+        .with_single_cert(cert_chain, key_der)
+        .map_err(|error| io::Error::new(io::ErrorKind::Other, error))
 }
 
 pub mod load {
